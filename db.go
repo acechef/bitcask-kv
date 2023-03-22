@@ -18,7 +18,7 @@ type DB struct {
 	mu         *sync.RWMutex
 	fileIds    []int                     // 文件id, 只能在加载索引的时候使用，不能在其他的地方更新和使用
 	activeFile *data.DataFile            // 当前活跃数据文件
-	oldFiles   map[uint32]*data.DataFile // 旧的数据文件，只能用于读取
+	olderFiles map[uint32]*data.DataFile // 旧的数据文件，只能用于读取
 	index      index.Indexer
 }
 
@@ -36,10 +36,10 @@ func Open(options Options) (*DB, error) {
 	}
 	// 初始化 DB 实例结构体
 	db := &DB{
-		options:  options,
-		mu:       new(sync.RWMutex),
-		oldFiles: make(map[uint32]*data.DataFile),
-		index:    index.NewIndexer(options.IndexType),
+		options:    options,
+		mu:         new(sync.RWMutex),
+		olderFiles: make(map[uint32]*data.DataFile),
+		index:      index.NewIndexer(options.IndexType),
 	}
 
 	// 加载数据文件
@@ -132,7 +132,7 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 	if db.activeFile.FileId == logRecordPos.Fid {
 		dataFile = db.activeFile
 	} else {
-		dataFile = db.oldFiles[logRecordPos.Fid]
+		dataFile = db.olderFiles[logRecordPos.Fid]
 	}
 	// 数据文件为空
 	if dataFile == nil {
@@ -177,7 +177,7 @@ func (db *DB) appendLogRecord(record *data.LogRecord) (*data.LogRecordPos, error
 			return nil, err
 		}
 		// 当前活跃文件转化为旧的数据文件
-		db.oldFiles[db.activeFile.FileId] = db.activeFile
+		db.olderFiles[db.activeFile.FileId] = db.activeFile
 
 		// 打开新的数据文件
 		if err := db.setActiveDataFile(); err != nil {
@@ -257,7 +257,7 @@ func (db *DB) loadDatafiles() error {
 			db.activeFile = dataFile
 		} else {
 			// 说明是旧的数据文件
-			db.oldFiles[uint32(fid)] = dataFile
+			db.olderFiles[uint32(fid)] = dataFile
 		}
 	}
 	return nil
@@ -276,7 +276,7 @@ func (db *DB) loadIndexFromDatafiles() error {
 		if fileId == db.activeFile.FileId {
 			dataFile = db.activeFile
 		} else {
-			dataFile = db.oldFiles[fileId]
+			dataFile = db.olderFiles[fileId]
 		}
 
 		var offset int64 = 0
