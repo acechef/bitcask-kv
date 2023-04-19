@@ -39,13 +39,16 @@ const (
 
 	// ART 索引
 	ART
+
+	// BPlusTree B+ 树索引，将索引存储到磁盘上
+	BPlusTree
 )
 
 var DefaultOptions = Options{
 	DirPath:      os.TempDir(),
 	DataFileSize: 256 * 1024 * 1024, // 256M
 	SyncWrites:   false,
-	IndexType:    BTree,
+	IndexType:    BPlusTree,
 }
 
 var DefaultIteratorOptions = IteratorOptions{
