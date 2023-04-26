@@ -2,6 +2,7 @@ package bitcask_go
 
 import (
 	"bitcask-go/data"
+	"bitcask-go/utils"
 	"io"
 	"os"
 	"path"
@@ -24,6 +25,29 @@ func (db *DB) Merge() error {
 		db.mu.Unlock()
 		return ErrMergeIsProgress
 	}
+
+	// 查看可以merge的数量是否达到了阈值
+	totalSize, err := utils.DirSize(db.options.DirPath)
+	if err != nil {
+		db.mu.Unlock()
+		return err
+	}
+	if float32(db.reclaimSize)/float32(totalSize) < db.options.DataFileMergeRatio {
+		db.mu.Unlock()
+		return ErrMergeRatioUnreached
+	}
+
+	// 查看剩余的空间容量是否可以容纳merge之后的数据量
+	availableDishSize, err := utils.AvailableDishSize()
+	if err != nil {
+		db.mu.Unlock()
+		return err
+	}
+	if uint64(totalSize-db.reclaimSize) > availableDishSize {
+		db.mu.Unlock()
+		return ErrNoEnoughSpaceForMerge
+	}
+
 	db.isMerging = true
 	defer func() {
 		db.isMerging = false
@@ -39,10 +63,9 @@ func (db *DB) Merge() error {
 	// 打开新的活跃文件
 	if err := db.setActiveDataFile(); err != nil {
 		db.mu.Unlock()
-		return err
+		return nil
 	}
 	// 记录最近没有参与merge的文件id
-
 	nonMergeFileId := db.activeFile.FileId
 
 	var mergeFiles []*data.DataFile
@@ -96,7 +119,9 @@ func (db *DB) Merge() error {
 			realKey, _ := parseLogRecordKey(logRecord.Key)
 			logRecordPos := db.index.Get(realKey)
 			// 和内存中的索引位置进行比较，如果有效则重写
-			if logRecordPos != nil && logRecordPos.Fid == dataFile.FileId && logRecordPos.Offset == offset {
+			if logRecordPos != nil &&
+				logRecordPos.Fid == dataFile.FileId &&
+				logRecordPos.Offset == offset {
 				// 有效数据
 				// 清除事务标记
 				logRecord.Key = logRecordKeyWithSeq(realKey, nonTransactionSeqNo)
@@ -164,11 +189,14 @@ func (db *DB) loadMergeFiles() error {
 	var mergeFinished bool
 	var mergeFileNames []string
 	for _, entry := range dirEntries {
-		if entry.Name() == data.HintFinishedFileName {
+		if entry.Name() == data.MergeFinishedFileName {
 			mergeFinished = true
 		}
 		if entry.Name() == data.SeqNoFileName {
 			// 跳过
+			continue
+		}
+		if entry.Name() == fileLockName {
 			continue
 		}
 		mergeFileNames = append(mergeFileNames, entry.Name())
@@ -229,7 +257,7 @@ func (db *DB) loadIndexFromHintFile() error {
 	}
 
 	// 打开hint索引文件
-	hintFile, err := data.OpenHintFile(hintFileName)
+	hintFile, err := data.OpenHintFile(db.options.DirPath)
 	if err != nil {
 		return err
 	}

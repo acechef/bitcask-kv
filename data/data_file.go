@@ -15,7 +15,7 @@ var (
 
 const DataFileNameSuffix = ".data"
 const HintFileName = "hint-index"
-const HintFinishedFileName = "merge-finished"
+const MergeFinishedFileName = "merge-finished"
 const SeqNoFileName = "seq-no"
 
 type DataFile struct {
@@ -38,7 +38,7 @@ func OpenHintFile(dirPath string) (*DataFile, error) {
 
 // OpenMergeFinishedFile 打开标识merge完成的文件
 func OpenMergeFinishedFile(dirPath string) (*DataFile, error) {
-	fileName := filepath.Join(dirPath, HintFinishedFileName)
+	fileName := filepath.Join(dirPath, MergeFinishedFileName)
 	return newDataFile(fileName, 0, fio.StandardFIO)
 }
 
