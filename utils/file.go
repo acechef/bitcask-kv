@@ -2,7 +2,9 @@ package utils
 
 import (
 	"io/fs"
+	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -32,4 +34,42 @@ func AvailableDishSize() (uint64, error) {
 		return 0, err
 	}
 	return stat.Bavail * uint64(stat.Bsize), nil
+}
+
+// CopyDir 拷贝数据目录
+func CopyDir(src, dest string, exclude []string) error {
+	// 目标目录不存在则创建
+	if _, err := os.Stat(dest); os.IsNotExist(err) {
+		if err := os.MkdirAll(dest, os.ModePerm); err != nil {
+			return err
+		}
+	}
+	return filepath.Walk(src, func(path string, info fs.FileInfo, err error) error {
+		// "/tmp/a/11.data"获得11.data
+		filename := strings.Replace(path, src, "", 1)
+		if filename == "" {
+			return nil
+		}
+
+		for _, e := range exclude {
+			matched, err := filepath.Match(e, info.Name())
+			if err != nil {
+				return err
+			}
+			if matched {
+				return nil
+			}
+		}
+		// 如果是目录，则在目标目录创建新目录
+		if info.IsDir() {
+			return os.MkdirAll(filepath.Join(dest, filename), info.Mode())
+		}
+		// 常规文件
+		// 读取
+		data, err := os.ReadFile(filepath.Join(src, filename))
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dest, filename), data, info.Mode())
+	})
 }

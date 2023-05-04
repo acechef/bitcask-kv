@@ -218,6 +218,14 @@ func (db *DB) Stat() *Stat {
 	}
 }
 
+// Backup 备份数据
+func (db *DB) Backup(dir string) error {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	return utils.CopyDir(db.options.DirPath, dir, []string{fileLockName})
+}
+
 // Put 写入 Key/Value 到数据文件
 func (db *DB) Put(key []byte, value []byte) error {
 	// 判断key是否有效
