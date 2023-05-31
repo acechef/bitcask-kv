@@ -80,3 +80,132 @@ func (rds *RedisDataStructure) Get(key []byte) ([]byte, error) {
 	}
 	return encValue[index:], nil
 }
+
+// ====================== Hash 数据结构 =======================
+
+func (rds *RedisDataStructure) HSet(key, field, value []byte) (bool, error) {
+	// 查找元数据
+	meta, err := rds.findMetadata(key, Hash)
+	if err != nil {
+		return false, err
+	}
+
+	// 构造Hash数据部分的key
+	hk := &hashInternalKey{
+		key:     key,
+		version: meta.version,
+		field:   field,
+	}
+	encKey := hk.encode()
+
+	// 先查找是否存在
+	var exist = true
+	if _, err := rds.db.Get(encKey); err == bitcask.ErrKeyNotFound {
+		exist = false
+	}
+
+	wb := rds.db.NewWriteBatch(bitcask.DefaultWriteBatchOptions)
+	// 不存在则更新元数据
+	if !exist {
+		meta.size++
+		_ = wb.Put(key, meta.encode())
+	}
+	_ = wb.Put(encKey, value)
+	if err := wb.Commit(); err != nil {
+		return false, err
+	}
+	return !exist, nil
+}
+
+func (rds *RedisDataStructure) HGet(key, field []byte) ([]byte, error) {
+	// 查找元数据
+	meta, err := rds.findMetadata(key, Hash)
+	if err != nil {
+		return nil, err
+	}
+	if meta.size == 0 {
+		return nil, nil
+	}
+
+	// 构造Hash数据部分的key
+	hk := &hashInternalKey{
+		key:     key,
+		version: meta.version,
+		field:   field,
+	}
+
+	return rds.db.Get(hk.encode())
+}
+
+func (rds *RedisDataStructure) HDel(key, field []byte) (bool, error) {
+	// 查找元数据
+	meta, err := rds.findMetadata(key, Hash)
+	if err != nil {
+		return false, err
+	}
+	if meta.size == 0 {
+		return false, nil
+	}
+
+	// 构造Hash数据部分的key
+	hk := &hashInternalKey{
+		key:     key,
+		version: meta.version,
+		field:   field,
+	}
+	encKey := hk.encode()
+
+	// 先查看是否存在
+	var exist = true
+	if _, err := rds.db.Get(encKey); err == bitcask.ErrKeyNotFound {
+		exist = false
+	}
+	if exist {
+		// 存在，则去删除，并且size-1
+		wb := rds.db.NewWriteBatch(bitcask.DefaultWriteBatchOptions)
+		meta.size--
+		_ = wb.Put(key, meta.encode())
+		_ = wb.Delete(encKey)
+		if err := wb.Commit(); err != nil {
+			return false, err
+		}
+	}
+	return exist, err
+}
+
+func (rds *RedisDataStructure) findMetadata(key []byte, dataType redisDataType) (*metadata, error) {
+	metaBuf, err := rds.db.Get(key)
+	if err != nil && err != bitcask.ErrKeyNotFound {
+		return nil, err
+	}
+
+	var meta *metadata
+	var exist = true
+	if err == bitcask.ErrKeyNotFound {
+		// 元数据不存在
+		exist = false
+	} else {
+		meta = decodeMetadata(metaBuf)
+		// 判断数据类型
+		if meta.dataType != dataType {
+			return nil, ErrWrongTypeOperation
+		}
+		// 判断过期时间
+		if meta.expire != 0 && meta.expire <= time.Now().UnixNano() {
+			exist = false
+		}
+	}
+	if !exist {
+		meta = &metadata{
+			dataType: dataType,
+			expire:   0,
+			version:  time.Now().UnixNano(),
+			size:     0,
+		}
+		if dataType == List {
+			meta.head = initialListMart
+			meta.tail = initialListMart
+		}
+	}
+	return meta, nil
+}
